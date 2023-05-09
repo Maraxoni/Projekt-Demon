@@ -9,49 +9,131 @@
 
 #define MAX_FILENAME_LENGTH 512
 
-struct FileInfo {
-    char name[MAX_FILENAME_LENGTH];
-    ino_t inode;
-    unsigned char type;
-};
+void monitorCatalogue(const char* dir1, const char* dir2) {
 
-void monitorCatalogue(const char* cgpath) {
-
-    struct dirent* entry;
-    struct FileInfo info;
-
-	printf("Wywolanie funkcji\n");
-	
     DIR* dir;
-    dir = opendir(cgpath);
+    struct dirent* entry;
+    struct stat statBuffer;
 
-    if (dir == NULL) {
-        printf("Error opening Catalogue.\n");
-		exit(EXIT_FAILURE);
+    // Sprawdzenie, czy istnieje katalog 1
+    if ((dir = opendir(dir1)) == NULL) {
+        perror("Błąd otwierania katalogu 1");
+        return;
     }
 
+    // Utworzenie katalogu 2, jeśli nie istnieje
+    mkdir(dir2, 0700);
+
+    // Przeiterowanie przez pliki w katalogu 1
     while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, "..") != 0) {
+        // Pominięcie aktualnego katalogu i katalogu nadrzędnego
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
 
-            char filePath[MAX_FILENAME_LENGTH];
-            snprintf(filePath, sizeof(filePath), "%s/%s", cgpath, entry->d_name);
+        // Skonstruowanie pełnej ścieżki pliku w katalogu 1
+        snprintf(path1, PATH_MAX, "%s/%s", dir1, entry->d_name);
 
-            DIR* subDir = opendir(filePath);
-            if (subDir != NULL) 
-			{
-                printf("Found Catalogue: %s\n", entry->d_name);
-                closedir(subDir);
-            } 
-			else 
-			{
-                printf("Found File: %s\n", entry->d_name);
-                // Tutaj można wykonać dodatkowe operacje na znalezionych plikach
-            }
+        // Skonstruowanie pełnej ścieżki pliku w katalogu 2
+        snprintf(path2, PATH_MAX, "%s/%s", dir2, entry->d_name);
+
+        // Pobranie informacji o pliku
+        if (stat(path1, &statBuffer) != 0) {
+            perror("Błąd odczytu informacji o pliku");
+            continue;
+        }
+
+        // Jeśli plik istnieje w katalogu 1, ale nie ma go w katalogu 2, skopiuj go do katalogu 2
+        if (access(path2, F_OK) == -1) {
+            copyFiles(path1, path2);
+            continue;
         }
     }
 
+    // Zamknięcie katalogu 1
     closedir(dir);
-	exit(EXIT_SUCCESS);
+
+    // Sprawdzenie, czy istnieje katalog 2
+    if ((dir = opendir(dir2)) == NULL) {
+        perror("Błąd otwierania katalogu 2");
+        return;
+    }
+
+    // Przeiterowanie przez pliki w katalogu 2
+    while ((entry = readdir(dir)) != NULL) {
+        // Pominięcie aktualnego katalogu i katalogu nadrzędnego
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        // Skonstruowanie pełnej ścieżki pliku w katalogu 2
+        snprintf(path2, PATH_MAX, "%s/%s", dir2, entry->d_name);
+
+        // Jeśli plik istnieje w katalogu 2, ale nie ma go w katalogu 1, usuń go z katalogu 2
+        if (access(path2, F_OK) != -1) {
+            // Sprawdź, czy plik nie jest katalogiem
+            if (stat(path2, &statBuffer) == 0 && !S_IS
+DIR* dir;
+    struct dirent* entry;
+    char path1[PATH_MAX];
+    char path2[PATH_MAX];
+    struct stat statBuffer;
+
+    // Sprawdzenie, czy istnieje katalog 1
+    if ((dir = opendir(dir1)) == NULL) {
+        perror("Błąd otwierania katalogu 1");
+        return;
+    }
+
+    // Utworzenie katalogu 2, jeśli nie istnieje
+    mkdir(dir2, 0700);
+
+    // Przeiterowanie przez pliki w katalogu 1
+    while ((entry = readdir(dir)) != NULL) {
+        // Pominięcie aktualnego katalogu i katalogu nadrzędnego
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        // Skonstruowanie pełnej ścieżki pliku w katalogu 1
+        snprintf(path1, PATH_MAX, "%s/%s", dir1, entry->d_name);
+
+        // Skonstruowanie pełnej ścieżki pliku w katalogu 2
+        snprintf(path2, PATH_MAX, "%s/%s", dir2, entry->d_name);
+
+        // Pobranie informacji o pliku
+        if (stat(path1, &statBuffer) != 0) {
+            perror("Błąd odczytu informacji o pliku");
+            continue;
+        }
+
+        // Jeśli plik istnieje w katalogu 1, ale nie ma go w katalogu 2, skopiuj go do katalogu 2
+        if (access(path2, F_OK) == -1) {
+            copyFiles(path1, path2);
+            continue;
+        }
+    }
+
+    // Zamknięcie katalogu 1
+    closedir(dir);
+
+    // Sprawdzenie, czy istnieje katalog 2
+    if ((dir = opendir(dir2)) == NULL) {
+        perror("Błąd otwierania katalogu 2");
+        return;
+    }
+
+    // Przeiterowanie przez pliki w katalogu 2
+    while ((entry = readdir(dir)) != NULL) {
+        // Pominięcie aktualnego katalogu i katalogu nadrzędnego
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        // Skonstruowanie pełnej ścieżki pliku w katalogu 2
+        snprintf(path2, PATH_MAX, "%s/%s", dir2, entry->d_name);
+
+        // Jeśli plik istnieje w katalogu 2, ale nie ma go w katalogu 1, usuń go z katalogu 2
+        if (access(path2, F_OK) != -1) {
+            // Sprawdź, czy plik nie jest katalogiem
+            if (stat(path2, &statBuffer) == 0 && !S_IS
+
 }
 
 int main(int argc, char* argv[]) {
@@ -110,9 +192,10 @@ int main(int argc, char* argv[]) {
 		{
 			exit(EXIT_FAILURE);
 		}
+		
 		if (pid == 0)
 		{
-			monitorCatalogue(argv[1]);
+			monitorCatalogue(argv[1],argv[0]);
 			printf("Bazinga3 %d\n\n", pid);
 		}
 		sleep(7);
