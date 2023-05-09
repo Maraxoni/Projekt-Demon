@@ -1,12 +1,11 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
 #include <syslog.h>
 #include <string.h>
+#include <dirent.h>
 
-void copyFiles(const char* sourcePath, const char* destinationPath) {
+void copyFile(const char* sourcePath, const char* destinationPath) {
     FILE* sourceFile, * destinationFile;
     char ch;
 
@@ -44,55 +43,80 @@ void deleteFile(const char* filePath) {
     }
 }
 
-void compareDirectories(const char* dir1, const char* dir2) {
-    DIR* dir;
-    struct dirent* entry;
+void monitorCatalogue(const char* dir1_path, const char* dir2_path) {
+
+	printf("Update-1");
+    DIR* dir1 = opendir(dir1_path);
+	DIR* dir2 = opendir(dir2_path);
     char path1[PATH_MAX];
     char path2[PATH_MAX];
-    int fileExistsInDir1, fileExistsInDir2;
 
     // Sprawdzenie, czy istnieje katalog 1
-    if ((dir = opendir(dir1)) == NULL) {
-        perror("Błąd otwierania katalogu 1");
-        return;
-    }
+	printf("\nUpdate0");
 
-    // Sprawdzenie, czy istnieje katalog 2
-    if ((dir = opendir(dir2)) == NULL) {
-        perror("Błąd otwierania katalogu 2");
+    if (dir1 == NULL) {
+        perror("Błąd otwierania katalogu 1");
+		exit(EXIT_FAILURE);
         return;
     }
+	printf("Update1");
+    // Sprawdzenie, czy istnieje katalog 2
+    if (dir2 == NULL) {
+        perror("Błąd otwierania katalogu 2");
+		exit(EXIT_FAILURE);
+        return;
+    }
+	printf("Update2");
 
     // Przeiterowanie przez pliki w katalogu 1
-    while ((entry = readdir(dir)) != NULL) {
-        // Pominięcie aktualnego katalogu i katalogu nadrzędnego
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-            continue;
+    struct dirent* dir1_entry;
+    while ((dir1_entry = readdir(dir1)) != NULL) {
+        if (dir1_entry->d_type == DT_REG) {
+            int found = 0;
+            rewinddir(dir2);
 
-        // Skonstruowanie pełnej ścieżki pliku w katalogu 1
-        snprintf(path1, PATH_MAX, "%s/%s", dir1, entry->d_name);
+            struct dirent* dir2_entry;
+            while ((dir2_entry = readdir(dir2)) != NULL) {
+                if (dir2_entry->d_type == DT_REG && strcmp(dir1_entry->d_name, dir2_entry->d_name) == 0) {
+                    found = 1;
+                    break;
+                }
+            }
 
-        // Skonstruowanie pełnej ścieżki pliku w katalogu 2
-        snprintf(path2, PATH_MAX, "%s/%s", dir2, entry->d_name);
-
-        // Sprawdzenie, czy plik istnieje w katalogu 2
-        fileExistsInDir2 = access(path2, F_OK) != -1;
-
-        // Jeśli plik istnieje w katalogu 1, ale nie ma go w katalogu 2, skopiuj go do katalogu
-        if (!fileExistsInDir2) {
-            copyFiles(path1, path2);
-            continue;
-        }
-
-        // Jeśli plik istnieje w katalogu 2, ale nie ma go w katalogu 1, usuń go z katalogu 2
-        fileExistsInDir1 = access(path1, F_OK) != -1;
-        if (!fileExistsInDir1) {
-            deleteFile(path2);
+            if (!found) {
+                char src_file_path[512], dest_file_path[512];
+                snprintf(src_file_path, sizeof(src_file_path), "%s/%s", dir1_path, dir1_entry->d_name);
+                snprintf(dest_file_path, sizeof(dest_file_path), "%s/%s", dir2_path, dir1_entry->d_name);
+                copyFile(src_file_path, dest_file_path);
+            }
         }
     }
 
-    // Zamknięcie katalogu
-    closedir(dir);
+    rewinddir(dir2);
+
+    struct dirent* dir2_entry;
+    while ((dir2_entry = readdir(dir2)) != NULL) {
+        if (dir2_entry->d_type == DT_REG) {
+            int found = 0;
+            rewinddir(dir1);
+
+            struct dirent* dir1_entry;
+            while ((dir1_entry = readdir(dir1)) != NULL) {
+                if (dir1_entry->d_type == DT_REG && strcmp(dir2_entry->d_name, dir1_entry->d_name) == 0) {
+                    found = 1;
+                    break;
+                }
+            }
+
+            if (!found) {
+                char file_path[512];
+                snprintf(file_path, sizeof(file_path), "%s/%s", dir2_path, dir2_entry->d_name);
+                deleteFile(file_path);
+            }
+        }
+    }
+    
+	printf("Update3");
 }
 
 int main(int argc, char* argv[]) {
@@ -102,49 +126,69 @@ int main(int argc, char* argv[]) {
 		fprintf(stderr, "Usage: %s <directory>\n", argv[0]);
 		exit(EXIT_FAILURE);
 	}
+	printf("Katalog zrodlowy: %s\n",argv[0]);
+	printf("Katalog docelowy: %s\n",argv[1]);
 
-	/* Our process ID and Session ID */
+	char path1[PATH_MAX];
+	char path2[PATH_MAX];
+	
+	snprintf(path1, sizeof(path1),"%s" , argv[0]);
+	snprintf(path2, sizeof(path2),"%s" , argv[1]);
+	strcat(path1,"Data");
+    printf("Nowa wartosc zmiennej path1: %s\n", path1);
+    printf("Nowa wartosc zmiennej path2: %s\n", path2);
+	sleep(3);
+	/* Our process ID and Session ID 
+	copyFile("./ProjektKatalog","./ProjektData");
+	printf("Wykonano test:");*/
+	int choice = 0;
+	while((choice = getopt(argc,argv,""))!= -1)
+	{
+		switch(choice)
+		{
+			case 'R':
+				break;
+			case 't':
+				break;
+			case 's':
+				break;
+			default:
+				break;
+		}
+	}
+
 	pid_t pid, sid;
 
-	/* Fork off the parent process */
 	pid = fork();
+
 	if (pid < 0) {
 		exit(EXIT_FAILURE);
 	}
-	/* If we got a good PID, then
-	   we can exit the parent process. */
+
 	if (pid > 0) {
 		exit(EXIT_SUCCESS);
 	}
 
-	/* Change the file mode mask */
-	umask(0);
-
-	/* Open any logs here */
-
-	/* Create a new SID for the child process */
+	
 	sid = setsid();
 	if (sid < 0) {
-		/* Log the failure */
+
 		exit(EXIT_FAILURE);
 	}
 
-	/* Change the current working directory */
-	if ((chdir("/")) < 0) {
-		/* Log the failure */
+	/*if ((chdir("/")) < 0) {
+
 		exit(EXIT_FAILURE);
 	}
-
-	/* Close out the standard file descriptors */
+	
+	Close out the standard file descriptors 
 	close(STDIN_FILENO);
 	close(STDOUT_FILENO);
 	close(STDERR_FILENO);
-
-	/* Daemon-specific initialization goes here */
+    */
 
 	/* The Big Loop */
 	while (1) {
-		/* Do some task here ... */
 		pid = fork();
 		if (pid < 0)
 		{
@@ -153,10 +197,10 @@ int main(int argc, char* argv[]) {
 
 		if (pid == 0)
 		{
-			monitorCatalogue(argv[0]);
+			monitorCatalogue(path2,path1);
+			exit(EXIT_SUCCESS);
 		}
-		sleep(20); /* wait 20 seconds */
+		sleep(7); /* wait 20 seconds */
 	}
 	exit(EXIT_SUCCESS);
 }
-
