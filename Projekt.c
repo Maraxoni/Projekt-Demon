@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <syslog.h>
 #include <string.h>
+#include <signal.h>
 #include <dirent.h>
 #include <stdbool.h>
 #include <sys/sendfile.h>
@@ -13,14 +14,15 @@
 
 #define USER_TRIGGER SIGUSR1
 #define MAX_PATH_LENGTH 4096
+int ifUserInput = 0;
 
 //Sygnal
 void handleSignal(int signal)
 {
 	if(signal== USER_TRIGGER){
 		fprintf(stdout,"Obudzenie przez uzytkownika");
-		syslog(LOG_INFO,"Trigger uzytkowinka. Wymuszenie demona");
-		user_input_check = 1;
+		syslog(LOG_INFO,"Sygnal uzytkowinka. Wybudzenie demona");
+		ifUserInput = 1;
 	}	
 	else{
 		syslog(LOG_INFO,"%d\n", signal);
@@ -32,6 +34,7 @@ void computeSHA(unsigned char* shaHash, const char* filePath) {
     int file = open(filePath, O_RDONLY);
     if (file == -1) {
         // Obsluga bledu otwarcia pliku
+        syslog(LOG_ERR, "Blad otwierania pliku");
         return;
     }
     // Wykorzystanie algorytmu ssl
@@ -57,13 +60,15 @@ long getFileSize(const char* filePath) {
     int file = open(filePath, O_RDONLY);
     if (file == -1) {
         perror("Blad otwierania pliku");
+        syslog(LOG_ERR, "Blad otwierania pliku");
         return -1;
     }
 
     // Przesuwanie wskaznika na koniec
     off_t offset = lseek(file, 0, SEEK_END);
     if (offset == -1) {
-        perror("Blad ustawienia wskaźnika");
+        perror("Blad ustawienia wskaznika");
+        syslog(LOG_ERR, "Blad ustawienia wskaznika");
         close(file);
         return -1;
     }
@@ -84,6 +89,7 @@ void copyFile(const char* srcPath, const char* dstPath) {
     srcFile = open(srcPath, O_RDONLY);
     if (srcFile == -1) {
         perror("Blad przy otwieraniu pliku zrodlowego");
+        syslog(LOG_ERR, "Blad przy otwieraniu pliku docelowego");
         return;
     }
 
@@ -91,6 +97,7 @@ void copyFile(const char* srcPath, const char* dstPath) {
     dstFile = open(dstPath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (dstFile == -1) {
         perror("Blad przy otwieraniu pliku docelowego");
+        syslog(LOG_ERR, "Blad przy otwieraniu pliku docelowego");
         close(srcFile);
         return;
     }
@@ -100,6 +107,7 @@ void copyFile(const char* srcPath, const char* dstPath) {
         bytesWritten = write(dstFile, buffer, bytesRead);
         if (bytesWritten == -1) {
             perror("Blad przy zapisie do pliku docelowego");
+            syslog(LOG_ERR, "Blad przy otwieraniu pliku docelowego");
             break;
         }
     }
@@ -107,6 +115,7 @@ void copyFile(const char* srcPath, const char* dstPath) {
     // Sprawdzanie czy wystapil blad podczas odczytu
     if (bytesRead == -1) {
         perror("Blad przy odczycie pliku zrodlowego");
+        syslog(LOG_ERR, "Blad przy otwieraniu pliku zrodlowego");
     }
 
     // Zamkanie plikow
@@ -123,6 +132,7 @@ void copyFileBig(const char* srcPath, const char* dstPath) {
     srcFile = open(srcPath, O_RDONLY);
     if (srcFile == -1) {
         perror("Blad przy otwieraniu pliku zrodlowego");
+        syslog(LOG_ERR, "Blad przy otwieraniu pliku zrodlowego");
         return;
     }
 
@@ -130,6 +140,7 @@ void copyFileBig(const char* srcPath, const char* dstPath) {
     dstFile = open(dstPath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (dstFile == -1) {
         perror("Blad przy otwieraniu pliku docelowego");
+        syslog(LOG_ERR, "Blad przy otwieraniu pliku docelowego");
         close(srcFile);
         return;
     }
@@ -140,6 +151,7 @@ void copyFileBig(const char* srcPath, const char* dstPath) {
         // Sprawdzanie czy wystapil blad podczas kopiowania
         if (bytesSent == -1) {
             perror("Blad przy kopiowaniu pliku");
+            syslog(LOG_ERR, "Blad przy kopiowaniu pliku");
             break;
         }
     }
@@ -153,10 +165,11 @@ void copyFileBig(const char* srcPath, const char* dstPath) {
 void deleteFile(const char* filePath) {
     //Usuwanie pliku i sprawdzanie czy sie usunal
     if (unlink(filePath) == 0) {
-        printf("Plik %s zostal usuniety.\n", filePath);
+        fprintf(stdout,"Plik %s zostal usuniety.\n", filePath);
     }
     else {
         perror("Blad usuwania pliku");
+        syslog(LOG_ERR, "Blad usuwania pliku");
     }
 }
 
@@ -167,6 +180,7 @@ void deleteDirectory(const char* dirPath) {
     DIR* dir = opendir(dirPath);
     if (dir == NULL) {
         perror("Blad otwierania katalogu");
+        syslog(LOG_ERR, "Blad otwierania katalogu");
         exit(EXIT_FAILURE);
     }
 
@@ -188,23 +202,29 @@ void deleteDirectory(const char* dirPath) {
     //Usuwanie katalogu i sprawdzanie czy sie usunal
     if (rmdir(dirPath) != 0) {
         perror("Blad przy usuwaniu katalogu");
+        syslog(LOG_ERR, "Blad przy usuwaniu katalogu");
         exit(EXIT_FAILURE);
+    }
+    else{
+        fprintf(stdout,"Katalog %s zostal usuniety.\n", dirPath);
     }
 }
 
-void monitorDelete(const char* dir1Path, const char* dir2Path, bool rek) {
+void monitorDelete(const char* srcPath, const char* dstPath, bool rek) {
     // Otworzenie katalogow
-    DIR* dir1 = opendir(dir1Path);
-    DIR* dir2 = opendir(dir2Path);
+    DIR* dir1 = opendir(srcPath);
+    DIR* dir2 = opendir(dstPath);
 
     // Sprawdzenie, czy istnieje katalog 1
     if (dir1 == NULL) {
         perror("Blad otwierania katalogu 1");
+        syslog(LOG_ERR, "Blad otwierania katalogu 1");
         exit(EXIT_FAILURE);
     }
     // Sprawdzenie, czy istnieje katalog 2
     if (dir2 == NULL) {
         perror("Blad otwierania katalogu 2");
+        syslog(LOG_ERR, "Blad otwierania katalogu 2");
         exit(EXIT_FAILURE);
     }
 
@@ -228,8 +248,9 @@ void monitorDelete(const char* dir1Path, const char* dir2Path, bool rek) {
             }
             //Jezeli nie znajdzie pliku w katalogu zrodlowym to usuwa plik
             if (found == 0) {
-                snprintf(dstFilePath, sizeof(dstFilePath), "%s/%s", dir2Path, dir2Entry->d_name);
+                snprintf(dstFilePath, sizeof(dstFilePath), "%s/%s", dstPath, dir2Entry->d_name);
                 deleteFile(dstFilePath);
+                syslog(LOG_INFO, "Usunieto plik: %s", dstFilePath);
             }
         }
     }
@@ -252,15 +273,16 @@ void monitorDelete(const char* dir1Path, const char* dir2Path, bool rek) {
             //Jezeli nie znajdzie katalogu w katalogu zrodlowym, usuwa katalog
             //W przeciwnym razie wchodzi rekurencyjnie do tego katalogu
             if (found == 0) {
-                snprintf(dstFilePath, sizeof(dstFilePath), "%s/%s", dir2Path, dir2Entry->d_name);
+                snprintf(dstFilePath, sizeof(dstFilePath), "%s/%s", dstPath, dir2Entry->d_name);
                 char sub_dirPath[512];
-                snprintf(sub_dirPath, sizeof(sub_dirPath), "%s/%s", dir2Path, dir2Entry->d_name);
+                snprintf(sub_dirPath, sizeof(sub_dirPath), "%s/%s", dstPath, dir2Entry->d_name);
                 deleteDirectory(sub_dirPath);
+                syslog(LOG_INFO, "Usunieto katalog: %s", sub_dirPath);
             } else {
-                char sub_dir1Path[512], sub_dir2Path[512];
-                snprintf(sub_dir1Path, sizeof(sub_dir1Path), "%s/%s", dir1Path, dir2Entry->d_name);
-                snprintf(sub_dir2Path, sizeof(sub_dir2Path), "%s/%s", dir2Path, dir2Entry->d_name);
-                monitorDelete(sub_dir1Path, sub_dir2Path, rek);
+                char sub_srcPath[512], sub_dir2Path[512];
+                snprintf(sub_srcPath, sizeof(sub_srcPath), "%s/%s", srcPath, dir2Entry->d_name);
+                snprintf(sub_dir2Path, sizeof(sub_dir2Path), "%s/%s", dstPath, dir2Entry->d_name);
+                monitorDelete(sub_srcPath, sub_dir2Path, rek);
             }
         }
     }
@@ -269,10 +291,10 @@ closedir(dir1);
 closedir(dir2);
 }
 
-void monitorCatalogue(const char* dir1Path, const char* dir2Path, bool rek, long size) {
+void monitorCatalogue(const char* srcPath, const char* dstPath, bool rek, long size) {
     // Otworzenie katalogow
-    DIR* dir1 = opendir(dir1Path);
-	DIR* dir2 = opendir(dir2Path);
+    DIR* dir1 = opendir(srcPath);
+	DIR* dir2 = opendir(dstPath);
 
     // Sprawdzenie, czy istnieje katalog 1
     if (dir1 == NULL) {
@@ -282,6 +304,7 @@ void monitorCatalogue(const char* dir1Path, const char* dir2Path, bool rek, long
     // Sprawdzenie, czy istnieje katalog 2
     if (dir2 == NULL) {
         perror("Blad otwierania katalogu 2");
+        syslog(LOG_ERR, "Skopiowano plik: %s", dstPath);
 		exit(EXIT_FAILURE);
     }
     // Deklaracja sciezek
@@ -298,8 +321,8 @@ void monitorCatalogue(const char* dir1Path, const char* dir2Path, bool rek, long
             rewinddir(dir2);
             struct dirent* dir2Entry;
             while ((dir2Entry = readdir(dir2)) != NULL) {
-                snprintf(srcFilePath, sizeof(srcFilePath), "%s/%s", dir1Path, dir1Entry->d_name);
-                snprintf(dstFilePath, sizeof(dstFilePath), "%s/%s", dir2Path, dir1Entry->d_name);
+                snprintf(srcFilePath, sizeof(srcFilePath), "%s/%s", srcPath, dir1Entry->d_name);
+                snprintf(dstFilePath, sizeof(dstFilePath), "%s/%s", dstPath, dir1Entry->d_name);
                 computeSHA(hash1,srcFilePath);
                 computeSHA(hash2,dstFilePath);
                 if (dir2Entry->d_type == DT_REG && strcmp(hash1, hash2) == 0) {
@@ -318,6 +341,7 @@ void monitorCatalogue(const char* dir1Path, const char* dir2Path, bool rek, long
                 {
                     copyFileBig(srcFilePath, dstFilePath);
                 }
+                syslog(LOG_INFO, "Skopiowano plik: %s", dstFilePath);
             }
         }
         else if (dir1Entry->d_type == DT_DIR && rek == true && strcmp(dir1Entry->d_name, ".") != 0 && strcmp(dir1Entry->d_name, "..") != 0) {
@@ -333,12 +357,13 @@ void monitorCatalogue(const char* dir1Path, const char* dir2Path, bool rek, long
             }
             //Deklaracja sciezek
             char srcCatPath[512], dstCatPath[512];
-            snprintf(srcCatPath, sizeof(srcCatPath), "%s/%s", dir1Path, dir1Entry->d_name);
-            snprintf(dstCatPath, sizeof(dstCatPath), "%s/%s", dir2Path, dir1Entry->d_name);
+            snprintf(srcCatPath, sizeof(srcCatPath), "%s/%s", srcPath, dir1Entry->d_name);
+            snprintf(dstCatPath, sizeof(dstCatPath), "%s/%s", dstPath, dir1Entry->d_name);
             //Jezeli nie znajdzie katalogu to go tworzy
             if (found == 0) {
                 if (mkdir(dstCatPath, 0777) == -1) {
                     perror("Blad przy tworzeniu katalogu");
+                    syslog(LOG_ERR, "Blad przy tworzeniu katalogu");
                     exit(EXIT_FAILURE);
                 }
             }
@@ -357,23 +382,25 @@ int main(int argc, char* argv[]) {
 
 	if (argc < 2 && argc > 5) {
 		fprintf(stderr, "Usage: %s <directory>\n", argv[0]);
+        syslog(LOG_ERR, "Zle argumenty");
 		exit(EXIT_FAILURE);
 	}
 
     if (strcmp(argv[1],"." ) == 0 || strcmp(argv[1],"./" ) == 0 ) {
 		fprintf(stderr, "Can't monitor current catalogue [ %s ], your memory will have a bad time!\n", argv[1]);
+        syslog(LOG_ERR, "Zly katalog");
 		exit(EXIT_FAILURE);
 	}
     //Zmiana argumentow na sciezki
-	printf("Katalog zrodlowy: %s\n",argv[0]);
-	printf("Katalog docelowy: %s\n",argv[1]);
+	fprintf(stdout,"Katalog zrodlowy: %s\n",argv[0]);
+	fprintf(stdout,"Katalog docelowy: %s\n",argv[1]);
 	char path1[PATH_MAX];
 	char path2[PATH_MAX];
 	snprintf(path1, sizeof(path1),"%s" , argv[0]);
 	snprintf(path2, sizeof(path2),"%s" , argv[1]);
 	strcat(path1,"Data");
-    printf("Nowa wartosc zmiennej path1: %s\n", path1);
-    printf("Nowa wartosc zmiennej path2: %s\n", path2);
+    fprintf(stdout,"Nowa wartosc zmiennej path1: %s\n", path1);
+    fprintf(stdout,"Nowa wartosc zmiennej path2: %s\n", path2);
     //Deklaracja zmiennych
     bool rek = false;
     long size = 10;
@@ -399,15 +426,17 @@ int main(int argc, char* argv[]) {
 	}
     
     //Kontrola
-    printf("Nowa wartosc zmiennej time: %d\n", time);
-    printf("Nowa wartosc zmiennej size: %ld\n", size);
+    fprintf(stdout,"Nowa wartosc zmiennej time: %d\n", time);
+    fprintf(stdout,"Nowa wartosc zmiennej size: %ld\n", size);
     //Zmiana na mB
     size = size * 1024 * 1024;
+
     //Forkowanie
 	pid_t pid, sid;
 	pid = fork();
 
 	if (pid < 0) {
+        syslog(LOG_INFO, "Proces glowny");
 		exit(EXIT_FAILURE);
 	}
 	if (pid > 0) {
@@ -420,8 +449,8 @@ int main(int argc, char* argv[]) {
 		exit(EXIT_FAILURE);
 	}
 	
-	syslog(LOG_INFO, "Argumenty zostaly przyjete. Demon zaraz zmieni swoj stan...");
-	user_input_check = 0;
+	syslog(LOG_INFO, "Wczytano argumenty");
+	ifUserInput = 0;
 	
 	/* Petla Demona */
 	while (1) {
@@ -430,12 +459,13 @@ int main(int argc, char* argv[]) {
 		{
 			exit(EXIT_FAILURE);
 		}
-		if((sleep(time))==0 || user_input_check == 1)
-		syslog(LOG_INFO, "Demon sie obudzil");
+		if((sleep(time))==0 || ifUserInput == 1){
+            syslog(LOG_INFO, "Demon sie obudzil");
+        }
 		if (pid == 0)
 		{
 			monitorCatalogue(path2,path1,rek,size);
-            		monitorDelete(path2,path1,rek);
+            monitorDelete(path2,path1,rek);
 			exit(EXIT_SUCCESS);
 		}
 		sleep(time);
