@@ -11,137 +11,129 @@
 #include <sys/stat.h>
 #include <openssl/evp.h>
 
-#define MAX 4096
 #define MAX_PATH_LENGTH 4096
 
 // Funkcja do wyliczania sumy kontrolnej pliku przy użyciu SHA-256
-void computeSHA( unsigned char* shaHash, const char* filePath) {
-    int file;
-    file = open(filePath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+void computeSHA(unsigned char* shaHash, const char* filePath) {
+    int file = open(filePath, O_RDONLY);
+    if (file == -1) {
+        // Obsługa błędu otwarcia pliku
+        return;
+    }
+
     EVP_MD_CTX* shaContext = EVP_MD_CTX_new();
     const EVP_MD* shaAlgorithm = EVP_sha256();
     EVP_DigestInit_ex(shaContext, shaAlgorithm, NULL);
 
-    unsigned char buffer[MAX];
-    size_t bytesRead;
-
-    
+    unsigned char buffer[MAX_PATH_LENGTH];
+    ssize_t bytesRead;
 
     while ((bytesRead = read(file, buffer, sizeof(buffer))) > 0) {
         EVP_DigestUpdate(shaContext, buffer, bytesRead);
-        close(file);
-        return;
     }
 
-    EVP_DigestFinal_ex(shaContext, shaHash, NULL);
+    close(file);
 
+    EVP_DigestFinal_ex(shaContext, shaHash, NULL);
     EVP_MD_CTX_free(shaContext);
 }
 
-void copyFile(const char* sourcePath, const char* destinationPath) {
-    int sourceFile, destinationFile;
-    char ch;
-    unsigned char buffer[4096];
-    ssize_t bytesRead, bytesWritten;
-    // Otwarcie pliku źródłowego w trybie tylko do odczytu
-    sourceFile = open(sourcePath, O_RDONLY);
-
-    if (sourceFile == -1) {
-        perror("Błąd otwierania pliku źródłowego");
-        return;
+long getFileSize(const char* filePath) {
+    int fd = open(filePath, O_RDONLY);
+    if (fd == -1) {
+        perror("Błąd otwierania pliku");
+        return -1;
     }
 
-    // Otwarcie pliku docelowego w trybie do zapisu
-    destinationFile = open(destinationPath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-
-    if (destinationFile == -1) {
-        perror("Błąd otwierania pliku docelowego");
-        close(sourceFile);
-        return;
+    // Przesuwamy wskaźnik pliku na koniec
+    off_t offset = lseek(fd, 0, SEEK_END);
+    if (offset == -1) {
+        perror("Błąd ustawienia wskaźnika");
+        close(fd);
+        return -1;
     }
 
-    while ((bytesRead = read(sourceFile, buffer, sizeof(buffer))) > 0) {
-        bytesWritten = write(destinationFile, buffer, bytesRead);
-        if (bytesWritten == -1) {
-            perror("Błąd zapisu do pliku docelowego");
-            close(sourceFile);
-            close(destinationFile);
-            return;
-        }
-    }
+    // Pobieramy aktualną pozycję wskaźnika, co jest równoznaczne z rozmiarem pliku
+    long size = (long)offset;
 
-    if (bytesRead == -1) {
-        perror("Błąd odczytu z pliku źródłowego");
-    }
-
-    // Zamknięcie plików
-    close(sourceFile);
-    close(destinationFile);
+    close(fd);
+    return size;
 }
 
-void copyFileBig(const char* sourcePath, const char* destinationPath) {
-    int sourceFile, destinationFile;
+void copyFile(const char* srcPath, const char* dstPath) {
+    int srcFile, dstFile;
     char buffer[4096];
     ssize_t bytesRead, bytesWritten;
-    // Otwarcie pliku źródłowego w trybie tylko do odczytu
-    sourceFile = open(sourcePath, O_RDONLY);
 
-    if (sourceFile == -1) {
-        perror("Błąd otwierania pliku źródłowego");
+    // Otwórz plik źródłowy w trybie do odczytu
+    srcFile = open(srcPath, O_RDONLY);
+    if (srcFile == -1) {
+        perror("Błąd przy otwieraniu pliku źródłowego");
         return;
     }
 
-    // Otwarcie pliku docelowego w trybie do zapisu
-    destinationFile = open(destinationPath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-
-    if (destinationFile == -1) {
-        perror("Błąd otwierania pliku docelowego");
-        close(sourceFile);
+    // Otwórz plik docelowy w trybie do zapisu, utwórz go jeśli nie istnieje
+    dstFile = open(dstPath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (dstFile == -1) {
+        perror("Błąd przy otwieraniu pliku docelowego");
+        close(srcFile);
         return;
     }
 
-    // Pobranie rozmiaru pliku źródłowego
-    off_t file_size = lseek(sourceFile, 0, SEEK_END);
-    if (file_size == -1) {
-        perror("Błąd odczytu rozmiaru pliku źródłowego");
-        close(sourceFile);
-        close(destinationFile);
-        return;
-    }
-
-    // Przywrócenie wskaźnika na początek pliku źródłowego
-    if (lseek(sourceFile, 0, SEEK_SET) == -1) {
-        perror("Błąd ustawienia wskaźnika na początek pliku źródłowego");
-        close(sourceFile);
-        close(destinationFile);
-        return;
-    }
-
-    off_t offset = 0;
-    ssize_t bytes_sent = sendfile(destinationFile, sourceFile, &offset, file_size);
-
-    if (bytes_sent == -1) {
-        perror("sendfile");
-    }
-
-    while ((bytesRead = read(sourceFile, buffer, sizeof(buffer))) > 0) {
-        bytesWritten = write(destinationFile, buffer, bytesRead);
+    // Kopiuj zawartość pliku ze źródła do celu
+    while ((bytesRead = read(srcFile, buffer, sizeof(buffer))) > 0) {
+        bytesWritten = write(dstFile, buffer, bytesRead);
         if (bytesWritten == -1) {
-            perror("Błąd zapisu do pliku docelowego");
-            close(sourceFile);
-            close(destinationFile);
-            return;
+            perror("Błąd przy zapisie do pliku docelowego");
+            break;
         }
     }
 
+    // Sprawdź, czy wystąpił błąd podczas odczytu
     if (bytesRead == -1) {
-        perror("Błąd odczytu z pliku źródłowego");
+        perror("Błąd przy odczycie pliku źródłowego");
     }
 
-    // Zamknięcie plików
-    close(sourceFile);
-    close(destinationFile);
+    // Zamknij pliki
+    close(srcFile);
+    close(dstFile);
 }
+
+
+void copyFileBig(const char* srcPath, const char* dstPath) {
+    int srcFile, dstFile;
+    off_t offset = 0;
+
+    // Otwórz plik źródłowy w trybie do odczytu
+    srcFile = open(srcPath, O_RDONLY);
+    if (srcFile == -1) {
+        perror("Błąd przy otwieraniu pliku źródłowego");
+        return;
+    }
+
+    // Otwórz plik docelowy w trybie do zapisu, utwórz go jeśli nie istnieje
+    dstFile = open(dstPath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (dstFile == -1) {
+        perror("Błąd przy otwieraniu pliku docelowego");
+        close(srcFile);
+        return;
+    }
+
+    // Skopiuj zawartość pliku ze źródła do celu
+    ssize_t bytesSent;
+    while ((bytesSent = sendfile(dstFile, srcFile, &offset, 4096)) > 0) {
+        // Sprawdź, czy wystąpił błąd podczas kopiowania
+        if (bytesSent == -1) {
+            perror("Błąd przy kopiowaniu pliku");
+            break;
+        }
+    }
+
+    // Zamknij pliki
+    close(srcFile);
+    close(dstFile);
+}
+
 
 void deleteFile(const char* filePath) {
     printf("no: %s\n",filePath);
@@ -184,9 +176,9 @@ void deleteDirectory(const char* dir_path) {
     }
 }
 
-void monitorDelete(const char* dir1_path, const char* dir2_path, bool rek) {
-    DIR* dir1 = opendir(dir1_path);
-    DIR* dir2 = opendir(dir2_path);
+void monitorDelete(const char* dir1Path, const char* dir2Path, bool rek) {
+    DIR* dir1 = opendir(dir1Path);
+    DIR* dir2 = opendir(dir2Path);
 
     // Sprawdzenie, czy istnieje katalog 1
     if (dir1 == NULL) {
@@ -199,28 +191,28 @@ void monitorDelete(const char* dir1_path, const char* dir2_path, bool rek) {
         exit(EXIT_FAILURE);
     }
 
-    char src_file_path[512], dest_file_path[512];
-    unsigned char hash1[MAX];
-    unsigned char hash2[MAX];
+    char srcFilePath[512], dstFilePath[512];
+    unsigned char hash1[MAX_PATH_LENGTH];
+    unsigned char hash2[MAX_PATH_LENGTH];
 
     // Przeiterowanie przez pliki w katalogu 2
-    struct dirent* dir2_entry;
-    while ((dir2_entry = readdir(dir2)) != NULL) {
-        if (dir2_entry->d_type == DT_REG && strcmp(dir2_entry->d_name, ".") != 0 && strcmp(dir2_entry->d_name, "..") != 0) {
+    struct dirent* dir2Entry;
+    while ((dir2Entry = readdir(dir2)) != NULL) {
+        if (dir2Entry->d_type == DT_REG && strcmp(dir2Entry->d_name, ".") != 0 && strcmp(dir2Entry->d_name, "..") != 0) {
             int found = 0;
             rewinddir(dir1);
 
-            struct dirent* dir1_entry;
-            while ((dir1_entry = readdir(dir1)) != NULL) {
-                if (dir1_entry->d_type == DT_REG && strcmp(dir1_entry->d_name, dir2_entry->d_name) == 0) {
+            struct dirent* dir1Entry;
+            while ((dir1Entry = readdir(dir1)) != NULL) {
+                if (dir1Entry->d_type == DT_REG && strcmp(dir1Entry->d_name, dir2Entry->d_name) == 0) {
                     found = 1;
                     break;
                 }
             }
 
             if (found == 0) {
-                snprintf(dest_file_path, sizeof(dest_file_path), "%s/%s", dir2_path, dir2_entry->d_name);
-                deleteFile(dest_file_path);
+                snprintf(dstFilePath, sizeof(dstFilePath), "%s/%s", dir2Path, dir2Entry->d_name);
+                deleteFile(dstFilePath);
             }
         }
     }
@@ -228,27 +220,28 @@ void monitorDelete(const char* dir1_path, const char* dir2_path, bool rek) {
     rewinddir(dir2);
 
     // Przeiterowanie przez katalogi w katalogu 2
-    while ((dir2_entry = readdir(dir2)) != NULL) {
-        if (dir2_entry->d_type == DT_DIR && rek == true && strcmp(dir2_entry->d_name, ".") != 0 &&strcmp(dir2_entry->d_name, "..") != 0) {
-int found = 0;
-rewinddir(dir1);   struct dirent* dir1_entry;
-        while ((dir1_entry = readdir(dir1)) != NULL) {
-            if (dir1_entry->d_type == DT_DIR && strcmp(dir1_entry->d_name, dir2_entry->d_name) == 0) {
+    while ((dir2Entry = readdir(dir2)) != NULL) {
+        if (dir2Entry->d_type == DT_DIR && rek == true && strcmp(dir2Entry->d_name, ".") != 0 &&strcmp(dir2Entry->d_name, "..") != 0) {
+    int found = 0;
+    rewinddir(dir1);   
+    struct dirent* dir1Entry;
+        while ((dir1Entry = readdir(dir1)) != NULL) {
+            if (dir1Entry->d_type == DT_DIR && strcmp(dir1Entry->d_name, dir2Entry->d_name) == 0) {
                 found = 1;
                 break;
             }
         }
 
         if (found == 0) {
-            snprintf(dest_file_path, sizeof(dest_file_path), "%s/%s", dir2_path, dir2_entry->d_name);
+            snprintf(dstFilePath, sizeof(dstFilePath), "%s/%s", dir2Path, dir2Entry->d_name);
             char sub_dir_path[512];
-            snprintf(sub_dir_path, sizeof(sub_dir_path), "%s/%s", dir2_path, dir2_entry->d_name);
+            snprintf(sub_dir_path, sizeof(sub_dir_path), "%s/%s", dir2Path, dir2Entry->d_name);
             deleteDirectory(sub_dir_path);
         } else {
-            char sub_dir1_path[512], sub_dir2_path[512];
-            snprintf(sub_dir1_path, sizeof(sub_dir1_path), "%s/%s", dir1_path, dir2_entry->d_name);
-            snprintf(sub_dir2_path, sizeof(sub_dir2_path), "%s/%s", dir2_path, dir2_entry->d_name);
-            monitorDelete(sub_dir1_path, sub_dir2_path, rek);
+            char sub_dir1Path[512], sub_dir2Path[512];
+            snprintf(sub_dir1Path, sizeof(sub_dir1Path), "%s/%s", dir1Path, dir2Entry->d_name);
+            snprintf(sub_dir2Path, sizeof(sub_dir2Path), "%s/%s", dir2Path, dir2Entry->d_name);
+            monitorDelete(sub_dir1Path, sub_dir2Path, rek);
         }
     }
 }
@@ -258,12 +251,10 @@ closedir(dir2);
 
 }
 
-
-
-void monitorCatalogue(const char* dir1_path, const char* dir2_path, bool rek, int size) {
-
-    DIR* dir1 = opendir(dir1_path);
-	DIR* dir2 = opendir(dir2_path);
+void monitorCatalogue(const char* dir1Path, const char* dir2Path, bool rek, long size) {
+    // Otworzenie katalogow
+    DIR* dir1 = opendir(dir1Path);
+	DIR* dir2 = opendir(dir2Path);
 
     // Sprawdzenie, czy istnieje katalog 1
     if (dir1 == NULL) {
@@ -275,72 +266,73 @@ void monitorCatalogue(const char* dir1_path, const char* dir2_path, bool rek, in
         perror("Błąd otwierania katalogu 2");
 		exit(EXIT_FAILURE);
     }
-    char src_file_path[512], dest_file_path[512];
-    unsigned char hash1[MAX];
-    unsigned char hash2[MAX];
+    // Deklaracja sciezek
+    char srcFilePath[512], dstFilePath[512];
+    unsigned char hash1[MAX_PATH_LENGTH];
+    unsigned char hash2[MAX_PATH_LENGTH];
        
     // Przeiterowanie przez pliki w katalogu 1
-    struct dirent* dir1_entry;
-    while ((dir1_entry = readdir(dir1)) != NULL) {
-        if (dir1_entry->d_type == DT_REG && strcmp(dir1_entry->d_name, ".") != 0 && strcmp(dir1_entry->d_name, "..") != 0) {
-            
+    struct dirent* dir1Entry;
+    while ((dir1Entry = readdir(dir1)) != NULL) {
+        if (dir1Entry->d_type == DT_REG && strcmp(dir1Entry->d_name, ".") != 0 && strcmp(dir1Entry->d_name, "..") != 0) {
+            // Przeiterowanie przez pliki w katalogu 2, w celu znalezienia brakujacych plikow w katalogu docelowym
             int found = 0;
             rewinddir(dir2);
-
-            
-
-            struct dirent* dir2_entry;
-            while ((dir2_entry = readdir(dir2)) != NULL) {
-                snprintf(src_file_path, sizeof(src_file_path), "%s/%s", dir1_path, dir1_entry->d_name);
-                snprintf(dest_file_path, sizeof(dest_file_path), "%s/%s", dir2_path, dir1_entry->d_name);
-                computeSHA(hash1,src_file_path);
-                computeSHA(hash2,dest_file_path);
-                if (dir2_entry->d_type == DT_REG && strcmp(dir1_entry->d_name, dir2_entry->d_name) == 0) {
+            struct dirent* dir2Entry;
+            while ((dir2Entry = readdir(dir2)) != NULL) {
+                snprintf(srcFilePath, sizeof(srcFilePath), "%s/%s", dir1Path, dir1Entry->d_name);
+                snprintf(dstFilePath, sizeof(dstFilePath), "%s/%s", dir2Path, dir1Entry->d_name);
+                computeSHA(hash1,srcFilePath);
+                computeSHA(hash2,dstFilePath);
+                if (dir2Entry->d_type == DT_REG && strcmp(hash1, hash2) == 0) {
                     found = 1;
                     break;
                 }
-                /*if (dir2_entry->d_type == DT_REG && strcmp(hash1, hash2) == 0) {
-                    found = 1;
-                    break;
-                }*/
             }
-
+            // Jezeli nie znaleziono zadnych pasujacych plikow to wykonywane jest kopiowanie
             if (found == 0) {
-                copyFile(src_file_path, dest_file_path);
+                if(getFileSize(srcFilePath)<size)
+                {
+                    copyFile(srcFilePath, dstFilePath);
+                }
+                else
+                {
+                    copyFileBig(srcFilePath, dstFilePath);
+                }
             }
         }
 
-        else if (dir1_entry->d_type == DT_DIR && rek == true && strcmp(dir1_entry->d_name, ".") != 0 && strcmp(dir1_entry->d_name, "..") != 0) {
+        else if (dir1Entry->d_type == DT_DIR && rek == true && strcmp(dir1Entry->d_name, ".") != 0 && strcmp(dir1Entry->d_name, "..") != 0) {
             int found = 0;
             rewinddir(dir2);
 
-            struct dirent* dir2_entry;
-            while ((dir2_entry = readdir(dir2)) != NULL) {
-                if (dir2_entry->d_type == DT_DIR && strcmp(dir1_entry->d_name, dir2_entry->d_name) == 0) {
+            struct dirent* dir2Entry;
+            while ((dir2Entry = readdir(dir2)) != NULL) {
+                if (dir2Entry->d_type == DT_DIR && strcmp(dir1Entry->d_name, dir2Entry->d_name) == 0) {
                     found = 1;
                     break;
                 }
             }
 
             
-                char src_cat_path[512], dest_cat_path[512];
-                snprintf(src_cat_path, sizeof(src_cat_path), "%s/%s", dir1_path, dir1_entry->d_name);
-                snprintf(dest_cat_path, sizeof(dest_cat_path), "%s/%s", dir2_path, dir1_entry->d_name);
+                char srcCatPath[512], dstCatPath[512];
+                snprintf(srcCatPath, sizeof(srcCatPath), "%s/%s", dir1Path, dir1Entry->d_name);
+                snprintf(dstCatPath, sizeof(dstCatPath), "%s/%s", dir2Path, dir1Entry->d_name);
 
                 if (found == 0) {
-                    if (mkdir(dest_cat_path, 0777) == -1) {
+                    if (mkdir(dstCatPath, 0777) == -1) {
                         perror("Błąd przy tworzeniu katalogu");
                         exit(EXIT_FAILURE);
                     }
                 }
 
-                monitorCatalogue(src_cat_path, dest_cat_path, rek, size);
+                monitorCatalogue(srcCatPath, dstCatPath, rek, size);
             
         }
             
-            char sub_dir1_path[512], sub_dir2_path[512];
-            snprintf(sub_dir1_path, sizeof(sub_dir1_path), "%s/%s", dir1_path, dir1_entry->d_name);
-            snprintf(sub_dir2_path, sizeof(sub_dir2_path), "%s/%s", dir2_path, dir1_entry->d_name);
+            char sub_dir1Path[512], sub_dir2Path[512];
+            snprintf(sub_dir1Path, sizeof(sub_dir1Path), "%s/%s", dir1Path, dir1Entry->d_name);
+            snprintf(sub_dir2Path, sizeof(sub_dir2Path), "%s/%s", dir2Path, dir1Entry->d_name);
             
     }
     
@@ -362,27 +354,23 @@ int main(int argc, char* argv[]) {
 		fprintf(stderr, "Can't monitor current catalogue [ %s ], your memory will have a bad time!\n", argv[1]);
 		exit(EXIT_FAILURE);
 	}
-
+    //Zmiana argumentow na sciezki
 	printf("Katalog zrodlowy: %s\n",argv[0]);
 	printf("Katalog docelowy: %s\n",argv[1]);
-
 	char path1[PATH_MAX];
 	char path2[PATH_MAX];
-	
 	snprintf(path1, sizeof(path1),"%s" , argv[0]);
 	snprintf(path2, sizeof(path2),"%s" , argv[1]);
-
 	strcat(path1,"Data");
     printf("Nowa wartosc zmiennej path1: %s\n", path1);
     printf("Nowa wartosc zmiennej path2: %s\n", path2);
-
-	sleep(3);
-
+	sleep(1);
+    //Deklaracja zmiennych
     bool rek = false;
-    int time = 300, size = 10;
-
-	int choice = 0;
+    long size = 10;
+    int time = 300, choice = 0;
     
+    //Wczytanie argumentow przez getopta
 	while((choice = getopt(argc,argv,":t:s:R"))!= -1)
 	{
 		switch(choice)
@@ -400,40 +388,29 @@ int main(int argc, char* argv[]) {
 				break;
 		}
 	}
+    size = size * 1024 * 1024;
+    //Kontrola
     printf("Nowa wartosc zmiennej time: %d\n", time);
     printf("Nowa wartosc zmiennej size: %d\n", size);
 
+    //Forkowanie
 	pid_t pid, sid;
-
 	pid = fork();
 
 	if (pid < 0) {
 		exit(EXIT_FAILURE);
 	}
-
 	if (pid > 0) {
 		exit(EXIT_SUCCESS);
 	}
 
-	
 	sid = setsid();
 	if (sid < 0) {
 
 		exit(EXIT_FAILURE);
 	}
 
-	/*if ((chdir("/")) < 0) {
-
-		exit(EXIT_FAILURE);
-	}
-	
-	Close out the standard file descriptors 
-	close(STDIN_FILENO);
-	close(STDOUT_FILENO);
-	close(STDERR_FILENO);
-    */
-
-	/* The Big Loop */
+	/* Petla Demona */
 	while (1) {
 		pid = fork();
 		if (pid < 0)
