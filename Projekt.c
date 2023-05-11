@@ -379,7 +379,7 @@ void monitorCatalogue(const char* srcPath, const char* dstPath, bool rek, long s
 int main(int argc, char* argv[]) {
 	//argv[0] = sciezka zrodlowa
 	//argv[1] = sciezka docelowa
-
+	
 	if (argc < 2 && argc > 5) {
 		fprintf(stderr, "Usage: %s <directory>\n", argv[0]);
         syslog(LOG_ERR, "Zle argumenty");
@@ -391,6 +391,11 @@ int main(int argc, char* argv[]) {
         syslog(LOG_ERR, "Zly katalog");
 		exit(EXIT_FAILURE);
 	}
+	signal(SIGUSR1,handleSignal);
+	openlog("signalProgram", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_LOCAL1);
+	openlog("DEMON", LOG_PID|LOG_CONS, LOG_USER);
+	syslog(LOG_INFO, "Inicjalizacja");
+	fprintf(stdout,"Inicjalizacja\n");
     //Zmiana argumentow na sciezki
 	fprintf(stdout,"Katalog zrodlowy: %s\n",argv[0]);
 	fprintf(stdout,"Katalog docelowy: %s\n",argv[1]);
@@ -470,5 +475,6 @@ int main(int argc, char* argv[]) {
 		}
 		sleep(time);
 	}
+	closelog();
 	exit(EXIT_SUCCESS);
 }
