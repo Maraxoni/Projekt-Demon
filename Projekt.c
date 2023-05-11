@@ -11,8 +11,21 @@
 #include <openssl/evp.h>
 #include <sys/stat.h>
 
+#define USER_TRIGGER SIGUSR1
 #define MAX_PATH_LENGTH 4096
 
+//Sygnal
+void handleSignal(int signal)
+{
+	if(signal== USER_TRIGGER){
+		fprintf(stdout,"Obudzenie przez uzytkownika");
+		syslog(LOG_INFO,"Trigger uzytkowinka. Wymuszenie demona");
+		user_input_check = 1;
+	}	
+	else{
+		syslog(LOG_INFO,"%d\n", signal);
+	}
+}
 // Funkcja do wyliczania sumy kontrolnej pliku
 void computeSHA(unsigned char* shaHash, const char* filePath) {
     // Otwieranie pliku w trybie tylko do odczytu
@@ -406,7 +419,10 @@ int main(int argc, char* argv[]) {
 
 		exit(EXIT_FAILURE);
 	}
-
+	
+	syslog(LOG_INFO, "Argumenty zostaly przyjete. Demon zaraz zmieni swoj stan...");
+	user_input_check = 0;
+	
 	/* Petla Demona */
 	while (1) {
 		pid = fork();
@@ -414,11 +430,12 @@ int main(int argc, char* argv[]) {
 		{
 			exit(EXIT_FAILURE);
 		}
-
+		if((sleep(time))==0 || user_input_check == 1)
+		syslog(LOG_INFO, "Demon sie obudzil");
 		if (pid == 0)
 		{
 			monitorCatalogue(path2,path1,rek,size);
-            monitorDelete(path2,path1,rek);
+            		monitorDelete(path2,path1,rek);
 			exit(EXIT_SUCCESS);
 		}
 		sleep(time);
