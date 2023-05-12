@@ -6,6 +6,7 @@
 #include <syslog.h>
 #include <string.h>
 #include <signal.h>
+#include <sys/wait.h>
 #include <dirent.h>
 #include <stdbool.h>
 #include <sys/sendfile.h>
@@ -28,6 +29,12 @@ void handleSignal(int signal)
 		syslog(LOG_INFO,"%d\n", signal);
 	}
 }
+
+//Zbieranie procesow child, aby nie tworzyly sie procesy "zombie" czyli <defunct>
+void sigchld(int fd) {
+  waitpid(-1,NULL,WNOHANG);
+}
+
 // Funkcja do wyliczania sumy kontrolnej pliku
 void computeSHA(unsigned char* shaHash, const char* filePath) {
     // Otwieranie pliku w trybie tylko do odczytu
@@ -392,6 +399,7 @@ int main(int argc, char* argv[]) {
 		exit(EXIT_FAILURE);
 	}
 	signal(SIGUSR1,handleSignal);
+	    signal(SIGCHLD,sigchld);
 	openlog("signalProgram", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_LOCAL1);
 	openlog("DEMON", LOG_PID|LOG_CONS, LOG_USER);
 	syslog(LOG_INFO, "Inicjalizacja");
@@ -476,5 +484,6 @@ int main(int argc, char* argv[]) {
 		sleep(time);
 	}
 	closelog();
+        while(wait(NULL) > 0);
 	exit(EXIT_SUCCESS);
 }
